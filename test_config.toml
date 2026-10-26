@@ -1,0 +1,51 @@
+[monitor]
+check_updates = false
+
+[marketplace.facebook]
+search_city = 'la'
+city_name = 'Los Angeles'
+radius = 5
+currency = 'USD'
+ai = []
+search_interval = '30m'
+max_search_interval = '30m'
+sort_by = 'new'
+availability = 'in'
+
+[user.me]
+notify_with = ['notification.ntfy']
+
+[notification.ntfy]
+enabled = false
+ntfy_server = 'https://ntfy.sh'
+ntfy_topic = '${PRICE_WATCH_NTFY_TOPIC}'
+
+[item.macbook]
+search_phrases = ['MacBook M5 Pro 64GB']
+title_keywords = '(MacBook OR "Mac Book") AND Pro'
+keywords = 'M5 AND Pro'
+max_price = 3000
+ai = []
+
+[item.ams]
+enabled = false
+search_phrases = ['AMS 2 Pro']
+title_keywords = 'AMS AND Pro'
+keywords = 'AMS AND Pro'
+antikeywords = ['bracket', 'stand', 'mount', 'printed']
+max_price = 200
+search_city = 'la'
+city_name = 'Los Angeles'
+radius = 5
+ai = []
+
+[item.studio]
+search_phrases = ['Mac Studio']
+title_keywords = 'Mac AND Studio'
+sort_by = 'suggested'
+min_price = 3000
+max_price = 4000
+ai = []
+
+[watch.studio]
+notify = true

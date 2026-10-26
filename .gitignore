@@ -1,0 +1,27 @@
+# Private configuration and credentials
+*-private.json
+research-settings.json
+watches.json
+watches.previous.json
+settings.lock
+
+# Runtime state, logs and caches
+state/
+__pycache__/
+*.pyc
+
+# Built geocoder (rebuild with: swiftc -O geocode.swift -o bin/geocode)
+bin/
+
+# Backups and one-off validation copies
+backups/
+source-backups/
+studio-backup-*/
+studio-validation/
+validation-dashboard-v2/
+config.before-*.toml
+
+# Machine-specific configuration and notes (see config.example.toml)
+config.toml
+*-private.md
+inspect_location.py

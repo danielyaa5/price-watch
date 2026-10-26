@@ -1,0 +1,47 @@
+# Copy to config.toml and edit. config.toml is machine-specific and is not committed.
+# Watches added in the dashboard are stored in watches.json, which is not committed either.
+
+[monitor]
+check_updates = false
+
+[marketplace.facebook]
+search_city = 'la'
+city_name = 'Los Angeles'
+radius = 5
+currency = 'USD'
+ai = []
+search_interval = '30m'
+max_search_interval = '30m'
+sort_by = 'new'
+availability = 'in'
+
+# Center for pickup sources (Facebook, OfferUp, Craigslist). Facebook itself uses the
+# location saved on the account through its location dialog, so set that to the same place.
+[search_area]
+name = 'Los Angeles'
+state = 'CA'
+zip = '90012'
+latitude = 34.0522
+longitude = -118.2437
+
+# Link included in source-health alerts.
+[dashboard]
+sources_url = 'http://localhost:8088/price-watch/#sources'
+
+[user.me]
+notify_with = ['notification.ntfy']
+
+[notification.ntfy]
+enabled = false
+ntfy_server = 'https://ntfy.sh'
+ntfy_topic = '${PRICE_WATCH_NTFY_TOPIC}'
+
+# One example watch. Add more here or in the dashboard.
+[item.example_camera]
+search_phrases = ['Sony A7 IV']
+min_price = 900
+max_price = 1600
+ai = []
+
+[watch.example_camera]
+notify = true
