@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent
 STATE = ROOT/'state'
 STATE.mkdir(mode=0o700, exist_ok=True)
 OBSERVATIONS=[]
+SEARCH_LISTING_LIMIT=30  # Facebook listings opened per search phrase, in Facebook's result order
 ITEM_BUDGET=1080  # seconds per Facebook watch; the four-phrase Ducati watch needs more than 6 minutes
 RUN_BUDGET=1380  # seconds for all Facebook watches, under the 30-minute schedule
 LABELS = {'macbook':'MacBook Pro 16-inch M5 Pro, 64GB, 1TB', 'ams':'Bambu Lab AMS 2 Pro', 'studio':'Mac Studio'}
@@ -258,7 +259,8 @@ def checked_results(self):
         body=page.locator('body').inner_text(timeout=10000).lower()
         if not re.search(r'no results|no listings|couldn.t find any|nothing found',body):
             raise RuntimeError('Facebook returned no parsable listings and no explicit empty-results message')
-    return result
+    # Opening every listing and seller profile made busy searches run past their time limit.
+    return result[:SEARCH_LISTING_LIMIT]
 FacebookSearchResultPage.get_listings=checked_results
 
 def marketplace(browser,login=False):
