@@ -102,6 +102,32 @@ class OfferUpTests(unittest.TestCase):
         self.assertNotIn('Sacramento, CA', rows); self.assertEqual(rows['Pasadena, CA']['category'], 'match')
         self.assertEqual(rows['Los Angeles, CA']['reason'], 'pickup distance needs review')
 
+    def test_item_detail_coordinates_resolve_neighborhood_and_drop_far_la_listings(self):
+        w = definitions(self.root)[1]['studio']; w['radius'] = 5
+        mutate_watch({'version': definitions(self.root)[2]['version'], 'id': 'studio', 'watch': w}, self.root)
+        self.page['searchFeedParams']['radius'] = '5'
+        self.page['searchFeedResponse']['filters'][0]['options'] = [{'value': '5', 'isSelected': True}]
+        tile = self.page['searchFeedResponse']['looseTiles'][0]
+        tile['listing'].update(listingId='11111111-1234-1234-1234-123456789abc', locationName='Los Angeles, CA')
+        far_la = copy.deepcopy(tile)
+        far_la['listing'].update(listingId='22222222-1234-1234-1234-123456789abc', locationName='Los Angeles, CA')
+        self.page['searchFeedResponse']['looseTiles'] = [tile, far_la]
+        near_lat = round(AREA['latitude'] + 0.02, 3)
+        near_lon = round(AREA['longitude'] + 0.02, 3)
+        ck = f'@{near_lat:.3f},{near_lon:.3f}'
+        details = {
+            '11111111-1234-1234-1234-123456789abc': {'latitude': str(near_lat), 'longitude': str(near_lon), 'locationName': 'Los Angeles, CA', 'zipcode': '91401'},
+            '22222222-1234-1234-1234-123456789abc': {'latitude': str(AREA['latitude'] - 0.35), 'longitude': str(AREA['longitude'] + 0.25), 'locationName': 'Los Angeles, CA', 'zipcode': '90001'},
+        }
+        with patch('places.geocode', return_value={'found': {ck: 'Valley Glen, CA'}, 'unknown': []}):
+            run(self.root, reason, fetcher=lambda url: self.html(), detail_fetcher=lambda ids: {k: details[k] for k in ids if k in details})
+        rows = snapshot(self.root)[0]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['id'], 'offerup_11111111-1234-1234-1234-123456789abc')
+        self.assertEqual(rows[0]['category'], 'match')
+        self.assertIn('Valley Glen, CA 91401 · about ', rows[0]['location'])
+        self.assertIn(f"mi from {AREA['city']}", rows[0]['location'])
+
 if __name__ == '__main__': unittest.main()
 
 class RadiusConfirmationTests(unittest.TestCase):

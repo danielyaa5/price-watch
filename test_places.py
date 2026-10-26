@@ -34,5 +34,13 @@ class PlacesTests(unittest.TestCase):
     def test_dashboard_verdict_uses_cache_only(self):
         (self.root/'state/places.json').write_text(json.dumps({'Sacramento, CA':TOWNS['Sacramento, CA']}))
         self.assertEqual(verdict('Sacramento, CA',5,cached(self.root)),'outside');self.assertEqual(verdict('Glendale, CA',5,cached(self.root)),'review')
+    def test_reported_distance_and_zip_override_ambiguous_city(self):
+        center_name=SEARCH_AREA['name']
+        near=f'Valley Glen, CA 91401 · about 4 mi from {center_name}'
+        near_ambiguous=f'Los Angeles, CA 91401 · about 4 mi from {center_name}'
+        far=f'South Los Angeles, CA 90001 · about 19.4 mi from {center_name}'
+        result=check([near,near_ambiguous,far],5,self.root,self.geocoder)
+        self.assertIsNone(result[near]);self.assertIsNone(result[near_ambiguous]);self.assertEqual(result[far],'outside')
+        self.assertEqual(self.calls,[])
 
 if __name__=='__main__':unittest.main()

@@ -11,8 +11,17 @@ SLACK=3  # miles; a town's center is not the seller's door
 AMBIGUOUS={'los angeles, ca'}
 
 def key(location):
-    town=str(location or '').split('·')[0].strip()
+    town=re.sub(r'\s+\d{5}(?:-\d{4})?$','',str(location or '').split('·')[0].strip())
     return town if re.fullmatch(r"[A-Za-z .'-]+, [A-Z]{2}",town) else None
+
+def coord_key(lat,lon):
+    return f'@{float(lat):.3f},{float(lon):.3f}'
+
+def reported_miles(location):
+    m=re.search(r'·\s*about\s+(\d+(?:\.\d+)?)\s*mi\s+from\s+(.+?)\s*$',str(location or ''))
+    if m and m.group(2).casefold()==SEARCH_AREA['name'].casefold():
+        return float(m.group(1))
+    return None
 
 def miles(a,b):
     p1,p2=map(math.radians,(a[0],b[0]));dl=math.radians(b[1]-a[1])
@@ -46,6 +55,9 @@ def geocode(names):
 def verdict(location,radius,coordinates):
     """None inside the area; 'outside' beyond it or shipping-only; 'review' when the town cannot place the seller."""
     if str(location or '').strip().lower()=='ships to you':return 'outside'
+    distance=reported_miles(location)
+    if distance is not None:
+        return 'outside' if distance>radius else None
     town=key(location)
     if not town or town.lower() in AMBIGUOUS:return 'review'
     point=coordinates.get(town)
@@ -54,7 +66,7 @@ def verdict(location,radius,coordinates):
 
 def check(locations,radius,root=ROOT,geocoder=None):
     """Verdict for each location string, resolving town names in one batch."""
-    coordinates=lookup([key(l) for l in locations if key(l) and key(l).lower() not in AMBIGUOUS],root,geocoder)
+    coordinates=lookup([key(l) for l in locations if reported_miles(l) is None and key(l) and key(l).lower() not in AMBIGUOUS],root,geocoder)
     return {l:verdict(l,radius,coordinates) for l in locations}
 
 def cached(root=ROOT):

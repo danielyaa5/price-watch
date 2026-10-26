@@ -1,10 +1,11 @@
-"""Read public OfferUp search pages; no login or private API required.
+"""Read public OfferUp search pages and item location details; no login required.
 
-Only the first search page is collected. Detail pages may block machine access,
-so titles and the verified search condition are the entire matching evidence.
+Only the first search page is collected per phrase. Item coordinates and ZIP codes
+are batch-queried from OfferUp's public GraphQL endpoint to place listings accurately.
 """
 import fcntl
 import json
+import math
 import re
 import subprocess
 import time
@@ -14,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote, urlencode
 from watch_config import search_bounds, atomic, definitions, fingerprint, now, read, SEARCH_AREA
-from places import check
+from places import AMBIGUOUS, check, coord_key, key, lookup, miles
 
 AREA = {'city': SEARCH_AREA['name'], 'state': SEARCH_AREA['state'], 'zipCode': SEARCH_AREA['zip'],
         'latitude': SEARCH_AREA['latitude'], 'longitude': SEARCH_AREA['longitude'], 'source': 'zipcode'}
@@ -73,6 +74,76 @@ def fetch(url):
     return body.decode('utf-8')
 
 
+def fetch_details(listing_ids):
+    ids = [lid for lid in dict.fromkeys(listing_ids) if re.fullmatch(r'[a-f0-9-]{36}', str(lid))]
+    if not ids:
+        return {}
+    fields = 'listingId locationDetails { latitude longitude locationName zipcode }'
+    aliases = '\n'.join(f'l{i}: listing(listingId: "{lid}") {{{fields}}}' for i, lid in enumerate(ids[:45]))
+    payload = json.dumps({'operationName': 'BatchLocations', 'variables': {}, 'query': f'query BatchLocations {{{aliases}}}'})
+    try:
+        result = subprocess.run(['/usr/bin/curl', '--silent', '--show-error', '--max-time', '25',
+                                 '--max-filesize', '2000000', '--proto', '=https',
+                                 '-H', 'Content-Type: application/json', '--data', payload,
+                                 '--write-out', '\n%{http_code}', 'https://offerup.com/api/graphql'],
+                                capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        raise OfferUpError('OfferUp item details did not respond in time; previous results are retained.') from None
+    if result.returncode:
+        raise OfferUpError('OfferUp item details could not be reached; previous results are retained.')
+    body, _, status = result.stdout.rpartition(b'\n')
+    if status != b'200':
+        raise OfferUpError('OfferUp rejected the item detail lookup (HTTP ' + status.decode('ascii', 'replace')[:3] + ').')
+    try:
+        data = json.loads(body.decode('utf-8')).get('data') or {}
+    except ValueError:
+        raise OfferUpError('OfferUp returned unreadable item details.') from None
+    out = {}
+    for entry in data.values():
+        if isinstance(entry, dict) and entry.get('listingId'):
+            out[str(entry['listingId'])] = entry.get('locationDetails') or {}
+    return out
+
+
+def resolve_locations(rows, radius, root, details):
+    center = (SEARCH_AREA['latitude'], SEARCH_AREA['longitude'])
+    center_name = SEARCH_AREA['name']
+    kept = []
+    ambiguous_coords = []
+    for row in rows:
+        item_id = str(row.get('id', '')).removeprefix('offerup_')
+        loc = details.get(item_id) or {}
+        try:
+            lat, lon = float(loc['latitude']), float(loc['longitude'])
+            if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            kept.append(row)
+            continue
+        dist = round(miles(center, (lat, lon)), 1)
+        if dist > radius:
+            continue
+        loc_name = str(loc.get('locationName') or row.get('location') or '').strip()
+        zipcode = str(loc.get('zipcode') or '').strip()
+        ck = coord_key(lat, lon)
+        if not key(loc_name) or key(loc_name).lower() in AMBIGUOUS:
+            ambiguous_coords.append(ck)
+        row = {**row, '_coord_key': ck, '_dist': dist, '_loc_name': loc_name, '_zip': zipcode if re.fullmatch(r'\d{5}', zipcode) else ''}
+        kept.append(row)
+    resolved = lookup(ambiguous_coords, root) if ambiguous_coords else {}
+    out = []
+    for row in kept:
+        if '_dist' in row:
+            ck = row.pop('_coord_key'); dist = row.pop('_dist'); loc_name = row.pop('_loc_name'); zipcode = row.pop('_zip')
+            place = resolved.get(ck) if (not key(loc_name) or key(loc_name).lower() in AMBIGUOUS) else loc_name
+            place = place or loc_name or 'Local pickup'
+            suffix = (' ' + zipcode) if zipcode and zipcode not in place else ''
+            row['location'] = f'{place}{suffix} · about {dist:g} mi from {center_name}'[:200]
+            row['evidence'] = f'Search title, condition filter and item map coordinates checked (about {dist:g} mi from {center_name}). Open the listing to check its description and availability.'
+        out.append(row)
+    return out
+
+
 def parse_search(html, watch, query):
     parser = SearchPayload(); parser.feed(html)
     try:
@@ -121,9 +192,11 @@ def snapshot(root):
     return list(data['catalog'].values()), data['checks'], data['scan']
 
 
-def save_check(root, watch, rows, report):
+def save_check(root, watch, rows, report, dropped=()):
     path = Path(root) / 'state/offerup/results.json'
     data = read(path, {'catalog': {}, 'checks': {}, 'scan': {}})
+    for item_id in dropped:
+        data['catalog'].pop(watch['id'] + ':' + item_id, None)
     for row in rows:
         key = watch['id'] + ':' + row['id']; old = data['catalog'].get(key, {})
         history = old.get('price_history', [])
@@ -139,7 +212,9 @@ def save_scan(root, scan):
     data = read(path, {'catalog': {}, 'checks': {}, 'scan': {}}); data['scan'] = scan; atomic(path, data)
 
 
-def run(root, matcher, item_id=None, fetcher=fetch):
+def run(root, matcher, item_id=None, fetcher=fetch, detail_fetcher=None):
+    if detail_fetcher is None:
+        detail_fetcher = fetch_details if fetcher is fetch else (lambda _: {})
     root = Path(root); directory = root / 'state/offerup'; directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (directory / 'scan.lock').open('a') as lock:
         try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -160,9 +235,21 @@ def run(root, matcher, item_id=None, fetcher=fetch):
                     rows, limited = parse_search(fetcher(search_url(watch, query)), watch, query)
                     report['limited'] |= limited
                     found.update((r['id'], r) for r in rows)
-                # OfferUp pads a small radius with listings from across the region; keep only nearby towns.
-                area = check([r['location'] for r in found.values()], watch['radius'], root)
-                rows = [r for r in found.values() if area[r['location']] != 'outside']
+                details = {}
+                ids = [r['id'].removeprefix('offerup_') for r in found.values()]
+                for start in range(0, len(ids), 45):
+                    batch = ids[start:start + 45]
+                    if detail_fetcher is fetch_details:
+                        if calls >= 24 or time.monotonic() > deadline: raise OfferUpError('OfferUp scan limit reached. Narrow the phrases or reduce active watches.')
+                        if calls: time.sleep(0.5)
+                        calls += 1
+                    details.update(detail_fetcher(batch))
+                # OfferUp pads a small radius with listings from across the region; verify exact item coordinates and nearby towns.
+                rows = resolve_locations(list(found.values()), watch['radius'], root, details)
+                area = check([r['location'] for r in rows], watch['radius'], root)
+                rows = [r for r in rows if area[r['location']] != 'outside']
+                kept_ids = {r['id'] for r in rows}
+                dropped = [lid for lid in found if lid not in kept_ids]
                 for row in rows:
                     why = matcher(watch['id'], SimpleNamespace(**row), watch)
                     if not why and area[row['location']] == 'review': why = 'pickup distance needs review'
@@ -170,9 +257,9 @@ def run(root, matcher, item_id=None, fetcher=fetch):
                 latest = definitions(root)[1].get(watch['id'], {})
                 if not latest.get('enabled') or latest.get('archived') or 'offerup' not in latest.get('sources', []) or fingerprint(latest) != fingerprint(watch): continue
                 report.update(checked_at=now(), candidate_count=len(rows), matches=sum(r['category'] == 'match' for r in rows), radius=radius,
-                              detail=f'{radius}-mile OfferUp search from {AREA["city"]}. First page only; descriptions and availability need review.')
+                              detail=f'{radius}-mile OfferUp search from {AREA["city"]}, filtered to {watch["radius"]} mi using item map coordinates. First page only; descriptions and availability need review.')
                 if radius != watch['radius']: report['detail'] += f' OfferUp’s supported radius is narrower than your {watch["radius"]}-mile target.'
-                save_check(root, watch, rows, report); total += len(rows)
+                save_check(root, watch, rows, report, dropped); total += len(rows)
             except OfferUpError as error:
                 errors += 1; detail = str(error)
                 if 'HTTP 403' in detail or 'HTTP 429' in detail: blocked = detail

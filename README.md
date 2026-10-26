@@ -10,7 +10,7 @@ It runs on an always-on Mac and is built around [ai-marketplace-monitor](https:/
 |---|---|---|
 | Facebook Marketplace | Browser automation with a saved session you sign in to once | Facebook's local-pickup filter; listings outside the radius are skipped before they are opened |
 | eBay | Official Browse API | Buy It Now, US listings; budget checks include known shipping |
-| OfferUp | Public search pages | Towns beyond the radius are dropped (OfferUp pads small radii with distant listings) |
+| OfferUp | Public search pages and item location details | Distance and neighborhood from item map coordinates and ZIP codes (OfferUp pads small radii with distant listings) |
 | Craigslist | Public search and listing pages | Distance from the listing's map marker |
 | Retail stores | Direct store searches | New or any-condition watches |
 | Amazon | Public search pages | New or any-condition watches |
