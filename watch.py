@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local adapter for ai-marketplace-monitor 0.10.16; direct collectors plus optional Claude CLI research."""
+"""Local adapter for ai-marketplace-monitor 0.10.16; direct collectors plus optional agent CLI research (Antigravity or Claude)."""
 import argparse, fcntl, json, logging, os, re, signal, sqlite3, subprocess, sys, time, tomllib
 from datetime import datetime, timezone
 from pathlib import Path

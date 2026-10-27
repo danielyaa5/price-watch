@@ -65,3 +65,47 @@ class ResearchTests(unittest.TestCase):
                 atomic(path,{'scan':{'status':status,'attempt_epoch':100000-8*3600}})
                 self.assertEqual(run(self.root,runner=runner)['status'],'ok')
         self.assertEqual(snapshot(self.root)['interval_hours'],8)
+
+    def agy_events(self,model='gemini-3.8-flash-high',tool='read_url_content',status='SUCCESS'):
+        step=lambda i,name,params,state='DONE':{'event':'step_update','step_update':{'step_index':i,'state':state,'step_type':'tool','tool_name':name,'tool_info':{'name':name,'parameters':params}}}
+        events=[{'event':'init','init':{'model':model}},
+         step(1,'search_web',{'query':'hub'},'ACTIVE'),step(1,'search_web',{'query':'hub'}),
+         step(2,tool,{'Url':'https://example.com/hub'}),
+         {'event':'result','result':{'status':status,'response':'```json\n'+json.dumps(self.output)+'\n```','num_turns':1}}]
+        return '\n'.join(map(json.dumps,events))
+
+    def test_antigravity_is_the_default_engine_with_web_tools_only(self):
+        from claude_research import agy_command,engine,snapshot
+        self.assertEqual(engine(self.root),'agy')
+        args=agy_command('/test/agy',[self.watch])
+        self.assertEqual(args[args.index('--model')+1],'gemini-3.8-flash-high')
+        self.assertEqual(args[:3],['/usr/bin/sandbox-exec','-p',args[2]]);self.assertIn('mcp_config',args[2])
+        self.assertIn('plan',args);self.assertIn('--json-schema',args);self.assertNotIn('--dangerously-skip-permissions',args)
+        self.assertNotIn('PRIVATE',args[-1]);self.assertIn('read_url_content',args[-1])
+        self.assertEqual(snapshot(self.root)['model'],'gemini-3.8-flash-high')
+        atomic(self.root/'research-settings.json',{'enabled':True,'engine':'claude'})
+        self.assertEqual(snapshot(self.root)['model'],MODEL)
+
+    def test_antigravity_evidence_counts_searches_and_pages_it_read(self):
+        from claude_research import parse_agy
+        output,evidence=parse_agy(self.agy_events(),0)
+        self.assertEqual(output,self.output);self.assertEqual(evidence['web_searches'],1)
+        self.assertEqual(evidence['observed_urls'],{'https://example.com/hub'})
+        for bad in (self.agy_events(model='gemini-3.8-flash-low'),self.agy_events(tool='run_command'),self.agy_events(status='ERROR')):
+            with self.assertRaises(ResearchError):parse_agy(bad,0)
+
+    def test_links_antigravity_did_not_read_are_checked(self):
+        from claude_research import confirm_links
+        statuses={'https://example.com/sale':'blocked','https://example.com/gone':None}
+        self.output['watches'][0]['deals'].append(dict(self.output['watches'][0]['deals'][0],url='https://example.com/gone'))
+        with patch('claude_research.link_status',side_effect=lambda url:statuses[url]) as check:
+            observed,unconfirmed=confirm_links(self.output,{'https://example.com/hub'})
+        self.assertEqual(sorted(c.args[0] for c in check.call_args_list),['https://example.com/gone','https://example.com/sale'])
+        self.assertEqual(observed,{'https://example.com/hub','https://example.com/sale'});self.assertEqual(unconfirmed,{'https://example.com/sale'})
+        report=normalize(self.output,[self.watch],{**self.evidence,'observed_urls':observed,'unconfirmed_urls':unconfirmed})['hub']
+        self.assertEqual(len(report['deals']),1);self.assertFalse(report['deals'][0]['link_unconfirmed']);self.assertTrue(report['sales'][0]['link_unconfirmed'])
+
+    def test_link_check_refuses_private_hosts(self):
+        from claude_research import link_status
+        with patch('claude_research.socket.getaddrinfo',return_value=[(0,0,0,'',('192.168.1.1',443))]):
+            self.assertIsNone(link_status('https://example.com/hub'))
