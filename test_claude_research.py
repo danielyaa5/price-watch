@@ -109,3 +109,19 @@ class ResearchTests(unittest.TestCase):
         from claude_research import link_status
         with patch('claude_research.socket.getaddrinfo',return_value=[(0,0,0,'',('192.168.1.1',443))]):
             self.assertIsNone(link_status('https://example.com/hub'))
+
+    def test_grounding_redirects_become_store_urls_or_are_dropped(self):
+        from claude_research import resolve_grounding,confirm_links
+        g='https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQ'
+        self.output['watches'][0]['deals'][0]['url']=g+'1'
+        self.output['watches'][0]['sales'][0]['url']=g+'2'
+        targets={g+'1':'https://example.com/hub',g+'2':None}
+        with patch('claude_research.redirect_target',side_effect=lambda u:targets[u]):
+            read=resolve_grounding(self.output,{g+'1'})
+        self.assertEqual(read,{'https://example.com/hub'})
+        self.assertEqual(self.output['watches'][0]['deals'][0]['url'],'https://example.com/hub')
+        self.assertIsNone(self.output['watches'][0]['sales'][0]['url'])
+        with patch('claude_research.link_status',side_effect=AssertionError('read pages need no check')):
+            observed,_=confirm_links(self.output,read)
+        report=normalize(self.output,[self.watch],{**self.evidence,'observed_urls':observed})['hub']
+        self.assertEqual([d['url'] for d in report['deals']],['https://example.com/hub']);self.assertEqual(report['sales'],[])
