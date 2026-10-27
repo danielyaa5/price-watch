@@ -125,3 +125,9 @@ class ResearchTests(unittest.TestCase):
             observed,_=confirm_links(self.output,read)
         report=normalize(self.output,[self.watch],{**self.evidence,'observed_urls':observed})['hub']
         self.assertEqual([d['url'] for d in report['deals']],['https://example.com/hub']);self.assertEqual(report['sales'],[])
+
+    def test_antigravity_deals_need_a_page_it_read(self):
+        report=normalize(self.output,[self.watch],{**self.evidence,'read_urls':set()})['hub']['deals'][0]
+        self.assertFalse(report['within_budget']);self.assertIn('not read',report['filter_result'])
+        report=normalize(self.output,[self.watch],{**self.evidence,'read_urls':{'https://example.com/hub'}})['hub']['deals'][0]
+        self.assertTrue(report['within_budget'])

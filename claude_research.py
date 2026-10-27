@@ -118,7 +118,7 @@ def invoke_agy(watches):
     with tempfile.TemporaryDirectory(prefix='price-watch-research-') as cwd:
         out,code=execute(agy_command(binary,watches),None,cwd,env,'Antigravity')
     output,evidence=parse_agy(out,code)
-    read_urls=resolve_grounding(output,evidence['observed_urls'])
+    read_urls=evidence['read_urls']=resolve_grounding(output,evidence['observed_urls'])
     evidence['observed_urls'],evidence['unconfirmed_urls']=confirm_links(output,read_urls)
     return output,evidence
 
@@ -289,6 +289,8 @@ def normalize(data,watches,evidence,matcher=None):
             condition=condition if condition in ('new','used','refurbished') else 'unknown'
             listing=SimpleNamespace(title=text(d.get('title'),600),description='',condition=condition,price=f'${price:.2f}' if price else 'Unverified price')
             why='unverified price' if price is None else price_rule(w,listing,price)
+            # Gemini's search summaries can carry invented titles, prices and dates, so only a page it read qualifies.
+            if not why and 'read_urls' in evidence and url not in evidence['read_urls']:why='price from search results, not read from the page'
             if not why and condition=='unknown':why='condition needs review'
             if not why and w['condition']!='any' and condition_bucket(listing)!=w['condition']:why='condition outside watch'
             if not why and matcher:why=matcher(w['id'],listing,w)
