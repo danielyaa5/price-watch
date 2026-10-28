@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Local adapter for ai-marketplace-monitor 0.10.16; direct collectors plus optional agent CLI research (Antigravity or Claude)."""
-import argparse, fcntl, json, logging, os, re, signal, sqlite3, subprocess, sys, time, tomllib
+import argparse, fcntl, json, logging, os, re, shlex, signal, socket, sqlite3, subprocess, sys, time, tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
@@ -316,7 +316,8 @@ def marketplace(browser,login=False):
     return m,c
 
 LOGIN_ALERT=STATE/'login-alert.json'
-LOGIN_FIX='cd ~/Developer/price-watch && ~/.local/share/uv/tools/ai-marketplace-monitor/bin/python watch.py --login'
+LOGIN_FIX=f'cd {shlex.quote(str(ROOT))} && {shlex.quote(sys.executable)} watch.py --login'
+HOST=socket.gethostname().removesuffix('.local')
 
 def alert_login_expired(error,poster=None):
     # One phone alert per outage: the marker stays until a login succeeds, so the
@@ -326,7 +327,7 @@ def alert_login_expired(error,poster=None):
         dest=json.loads((ROOT/'notification-private.json').read_text())
         response=(poster or requests.post)(dest['server'].rstrip('/'),json={'topic':dest['topic'],'priority':4,
             'title':'Price Watch: Facebook sign-in expired',
-            'message':'Facebook scans are paused until you sign in again. Screen Share into moms-air-m2 and run: '+LOGIN_FIX},timeout=15)
+            'message':f'Facebook scans are paused until you sign in again. On {HOST} (in person or over Screen Sharing), run: '+LOGIN_FIX},timeout=15)
         response.raise_for_status()
     except Exception:
         logging.error('Login-expired alert could not be sent; will retry on the next run.');return False
