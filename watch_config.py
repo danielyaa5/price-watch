@@ -14,6 +14,9 @@ def local_settings(root=ROOT):
 # Override it with a [search_area] table in config.toml (see config.example.toml).
 SEARCH_AREA={'name':'Los Angeles','state':'CA','zip':'90012','latitude':34.0522,'longitude':-118.2437,**local_settings().get('search_area',{})}
 DEFAULT_RADIUS=5
+# Facebook ends sessions that look automated, so watches are checked every 6 hours;
+# a new or edited watch is checked on the next 30-minute run.
+FACEBOOK_INTERVAL_HOURS=6
 STORES=['universe','expercom','printed']
 PROFILES={'studio':'Mac Studio configurations','macbook':'16-inch M5 Pro / 64GB / 1TB','ams':'Complete AMS 2 Pro','thunderbolt4':'Thunderbolt 4 hubs / docks','thunderbolt5':'Thunderbolt 5 hubs / docks','custom':'Custom keywords'}
 

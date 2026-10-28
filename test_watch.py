@@ -210,3 +210,56 @@ class FacebookAreaTests(unittest.TestCase):
             Path(tmp,'items.json').write_text(json.dumps({'a':{'status':'ok','checked_at':'2026-10-26T03:00'},'b':{'status':'ok','checked_at':'2026-10-26T02:00'},'c':{'status':'error','checked_at':'2026-10-26T03:20'}}))
             with patch.object(watch,'STATE',Path(tmp)):
                 self.assertEqual([n for n,_ in watch.facebook_order({'a':{},'b':{},'c':{},'d':{}})],['c','d','b','a'])
+
+class FacebookScheduleTests(unittest.TestCase):
+    def test_due_watches_follow_interval_edits_and_failed_runs(self):
+        import json,tempfile,watch
+        from datetime import datetime,timezone
+        from pathlib import Path
+        from watch_config import fingerprint
+        old=watch.STATE
+        try:
+            watch.STATE=Path(tempfile.mkdtemp())
+            defs={n:{'name':n,'revision':0,'queries':[n]} for n in ('fresh','old','edited','new','failed','off')}
+            c={'item':{n:({'enabled':False} if n=='off' else {}) for n in defs},'_definitions':defs}
+            at=lambda hours:datetime.fromtimestamp(100000-hours*3600,timezone.utc).isoformat()
+            ok=lambda n,hours,fp=None:{'status':'ok','checked_at':at(hours),'fingerprint':fp or fingerprint(defs[n])}
+            (watch.STATE/'items.json').write_text(json.dumps({'fresh':ok('fresh',1),'old':ok('old',7),'edited':ok('edited',1,'stale'),
+                'failed':{'status':'error','checked_at':at(2)},'off':ok('off',9)}))
+            (watch.STATE/'status.json').write_text(json.dumps({'status':'partial'}))
+            self.assertEqual(watch.facebook_due(c,100000),['old','edited','new','failed'])
+            (watch.STATE/'status.json').write_text(json.dumps({'status':'error'}))
+            self.assertEqual(watch.facebook_due(c,100000),['fresh','old','edited','new','failed'])
+        finally:watch.STATE=old
+
+class ScreenSharingTests(unittest.TestCase):
+    def test_fresh_status_is_used_and_unknown_waits(self):
+        import json,tempfile,time,watch
+        from pathlib import Path
+        from unittest import mock
+        old=watch.SHARING_STATUS
+        try:
+            watch.SHARING_STATUS=Path(tempfile.mkdtemp())/'status.json'
+            write=lambda connected,age=0:watch.SHARING_STATUS.write_text(json.dumps({'checked_at':time.time()-age,'valid':True,'connected':connected}))
+            write(True);self.assertTrue(watch.screen_sharing_active())
+            write(False);self.assertFalse(watch.screen_sharing_active())
+            write(False,age=600)
+            with mock.patch.object(watch,'SHARING_PROBE','com.example.screen-sharing-probe'),mock.patch.object(watch.subprocess,'run') as run,mock.patch.object(watch.time,'sleep'):
+                self.assertTrue(watch.screen_sharing_active())
+                self.assertIn('kickstart',run.call_args[0][0])
+        finally:watch.SHARING_STATUS=old
+
+class LoginAlertTests(unittest.TestCase):
+    def test_login_expiry_alerts_once_per_outage(self):
+        import tempfile, json, watch
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'notification-private.json').write_text(json.dumps({'server':'https://ntfy.example','topic':'t'}))
+            posts=[]
+            def poster(url,json=None,timeout=None):
+                posts.append(json);return SimpleNamespace(raise_for_status=lambda:None)
+            with patch.multiple(watch,ROOT=root,LOGIN_ALERT=root/'login-alert.json'):
+                self.assertFalse(watch.alert_login_expired('Facebook watch check exceeded its time limit',poster))
+                self.assertTrue(watch.alert_login_expired('Facebook authentication required; run the separate login command',poster))
+                self.assertFalse(watch.alert_login_expired('Facebook authentication required; run the separate login command',poster))
+            self.assertEqual(len(posts),1)
+            self.assertIn('watch.py --login',posts[0]['message'])

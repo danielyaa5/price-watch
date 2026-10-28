@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
 from dataclasses import asdict
-from watch_config import load_config, definitions, fingerprint, price_rule, condition_bucket
+from watch_config import load_config, definitions, fingerprint, price_rule, condition_bucket, FACEBOOK_INTERVAL_HOURS
 from places import check
 import requests
 from playwright.sync_api import sync_playwright
@@ -263,6 +263,49 @@ def checked_results(self):
     return result[:SEARCH_LISTING_LIMIT]
 FacebookSearchResultPage.get_listings=checked_results
 
+SHARING_STATUS=Path.home()/'Library/Application Support/AirTag Tracking/screen-sharing-status.json'
+SHARING_PROBE=os.environ.get('PRICE_WATCH_SHARING_PROBE','')
+
+def screen_sharing_active():
+    """Whether someone is using Screen Sharing on this Mac; unknown counts as yes, so browsers wait."""
+    def read():
+        try:
+            data=json.loads(SHARING_STATUS.read_text())
+            if data.get('valid') and 0<=time.time()-data['checked_at']<120:return bool(data['connected'])
+        except (OSError,ValueError,KeyError,TypeError):pass
+        return None
+    state=read()
+    if state is None:
+        # The AirTag tracker's probe refreshes this every 30 s; ask it for a fresh answer.
+        if SHARING_PROBE:
+            subprocess.run(['/bin/launchctl','kickstart',f'gui/{os.getuid()}/{SHARING_PROBE}'],capture_output=True,timeout=5)
+        for _ in range(50):
+            time.sleep(.1)
+            state=read()
+            if state is not None:break
+    return True if state is None else state
+
+def facebook_due(c,now_ts=None):
+    """Watches whose Facebook check is due: new or edited ones at once, the rest every few hours."""
+    now_ts=time.time() if now_ts is None else now_ts
+    try:saved=json.loads((STATE/'items.json').read_text())
+    except (OSError,ValueError):saved={}
+    try:last_run=json.loads((STATE/'status.json').read_text())
+    except (OSError,ValueError):last_run={}
+    due=[]
+    for name,opts in c['item'].items():
+        if opts.get('enabled') is False:continue
+        result=saved.get(name,{})
+        try:age=now_ts-datetime.fromisoformat(result['checked_at']).timestamp()
+        except (KeyError,TypeError,ValueError):due.append(name);continue
+        if result.get('status')=='ok':
+            # An edited watch needs its new criteria checked now.
+            if result.get('fingerprint')!=fingerprint(c['_definitions'][name]) or age>=FACEBOOK_INTERVAL_HOURS*3600-300:due.append(name)
+        elif age>=3600:due.append(name)
+    # A run that failed as a whole (such as a lost login) is retried on the next run.
+    if last_run.get('status')=='error':due=[n for n,o in c['item'].items() if o.get('enabled') is not False]
+    return due
+
 def marketplace(browser,login=False):
     cls=FacebookMarketplace if login else BoundedFacebook
     m=cls('facebook',browser,logger=logging.getLogger('price-watch'))
@@ -271,6 +314,24 @@ def marketplace(browser,login=False):
     options=c['marketplace']['facebook']
     m.configure(cls.get_config(name='facebook',**options))
     return m,c
+
+LOGIN_ALERT=STATE/'login-alert.json'
+LOGIN_FIX='cd ~/Developer/price-watch && ~/.local/share/uv/tools/ai-marketplace-monitor/bin/python watch.py --login'
+
+def alert_login_expired(error,poster=None):
+    # One phone alert per outage: the marker stays until a login succeeds, so the
+    # 30-minute retries don't repeat it. Facebook's security check needs a person.
+    if 'authentication required' not in error or LOGIN_ALERT.exists():return False
+    try:
+        dest=json.loads((ROOT/'notification-private.json').read_text())
+        response=(poster or requests.post)(dest['server'].rstrip('/'),json={'topic':dest['topic'],'priority':4,
+            'title':'Price Watch: Facebook sign-in expired',
+            'message':'Facebook scans are paused until you sign in again. Screen Share into moms-air-m2 and run: '+LOGIN_FIX},timeout=15)
+        response.raise_for_status()
+    except Exception:
+        logging.error('Login-expired alert could not be sent; will retry on the next run.');return False
+    atomic_json(LOGIN_ALERT,{'sent_at':now(),'error':error.split('\n')[0]})
+    return True
 
 def record_health(source,report,args):
     try:
@@ -311,13 +372,27 @@ def run(args):
         if not args.login and getattr(args,'source','all')!='facebook':
             from claude_research import launch_if_due
             launch_if_due(ROOT)
-            for source in ('ebay','offerup','retail','amazon','google_shopping','craigslist'):collect_source(source,args)
+            for source in ('ebay','offerup','retail','amazon','google_shopping','craigslist'):
+                # Amazon is read in a browser; wait for the next run while Screen Sharing is in use.
+                if source=='amazon' and screen_sharing_active():continue
+                collect_source(source,args)
+        due=None
+        if not args.login and not args.item and args.source=='all':
+            due=facebook_due(load_config(ROOT))
+            if not due:
+                print(json.dumps({'status':'not_due','detail':f'Facebook is checked every {FACEBOOK_INTERVAL_HOURS} hours'}))
+                return 0
+            if screen_sharing_active():
+                # The check opens a visible browser window; due watches stay due for the next run.
+                print(json.dumps({'status':'waiting','detail':'Screen Sharing is in use; Facebook check postponed'}))
+                return 0
         report={'started_at':now(),'status':'running','sources':{},'notification_delivery':'not exercised','phone_delivery':json.loads((STATE/'phone-status.json').read_text()) if (STATE/'phone-status.json').exists() else {'status':'unverified'}}
         if not args.login: atomic_json(STATE/'status.json',report)
         active_name=None
         try:
             with sync_playwright() as p:
-                browser=p.chromium.launch(headless=not args.login)
+                # A visible window, like the one used to sign in; a headless browser looks automated to Facebook.
+                browser=p.chromium.launch(headless=False)
                 try:
                     m,c=marketplace(browser,login=args.login)
                     if args.login:
@@ -325,6 +400,7 @@ def run(args):
                         m.login()
                         report.update(status='login_verified',finished_at=now())
                         atomic_json(STATE/'login-status.json',report)
+                        LOGIN_ALERT.unlink(missing_ok=True)
                         print('Facebook login verified and session saved.',flush=True)
                         return 0
                     if not SESSION_FILE.exists():raise RuntimeError('Facebook authentication required; no saved watcher session')
@@ -337,6 +413,14 @@ def run(args):
                     db.execute('CREATE TABLE IF NOT EXISTS initialized (item TEXT PRIMARY KEY,at TEXT)')
                     for name,opts in facebook_order(c['item']):
                         if args.item and args.item!=name:continue
+                        if due is not None and name in due and screen_sharing_active():
+                            # Screen Sharing started mid-run: stop opening pages; the rest stay due.
+                            report['sources'][name]=json.loads((STATE/'items.json').read_text()).get(name,{})
+                            due.remove(name);continue
+                        if due is not None and name not in due:
+                            # Not due: keep the last result instead of reporting it as unchecked.
+                            report['sources'][name]=json.loads((STATE/'items.json').read_text()).get(name,{})
+                            continue
                         if opts.get('enabled') is False:
                             report['sources'][name]={'status':'disabled','sent':[],'reason':'Watch is paused or archived'}
                             continue
@@ -384,7 +468,7 @@ def run(args):
                             m,_=marketplace(browser)
                         finally:signal.alarm(0)
                         atomic_json(STATE/'status.json',report)
-                    failed=[n for n,r in report['sources'].items() if r.get('status')=='error']
+                    failed=[n for n,r in report['sources'].items() if r.get('status')=='error' and (due is None or n in due)]
                     report.update(status='partial' if failed else 'ok',finished_at=now(),notification_delivery='provider accepted' if any(s['sent'] for s in report['sources'].values()) else 'no notifications sent')
                     if failed:report['error']='Facebook check failed for: '+', '.join(failed)
                     atomic_json(STATE/'status.json',report)
@@ -400,6 +484,7 @@ def run(args):
             save_history(report)
             if not args.login:
                 record_health('facebook',report,args)
+                if args.notify:alert_login_expired(str(e))
             print('Price watch error: '+str(e),file=sys.stderr);return 1
 
 if __name__=='__main__':

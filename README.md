@@ -39,6 +39,10 @@ It runs on an always-on Mac and is built around [ai-marketplace-monitor](https:/
 
 Runtime state, logs and caches live in `state/`.
 
+Browser checks wait while Screen Sharing is active or its status is unknown. The optional
+`PRICE_WATCH_SHARING_PROBE` environment variable names a local LaunchAgent that can refresh
+the status; otherwise the watcher waits for the separately scheduled probe.
+
 ## Tests
 
 ```bash
