@@ -18,6 +18,7 @@ This is a personal tool shared as-is: it is built for one Mac and one search are
 | Amazon | Public search pages | New or any-condition watches |
 | Google Shopping | SerpApi (free tier) | Every few hours, within the monthly quota |
 | Deal research (optional) | `agy` (Gemini) or `claude` CLI with web search only | Three times a day; results are saved for review and never alert |
+| Black Friday watch list (optional) | `agy` (Gemini), `codex` or `claude` CLI with web search only, picked per search | On demand from the dashboard; results are saved for review and never alert |
 
 ## How matching and alerts work
 
@@ -26,6 +27,12 @@ This is a personal tool shared as-is: it is built for one Mac and one search are
 - Pickup sources search around one center (`[search_area]` in `config.toml`). Towns are placed with Apple's geocoder (`bin/geocode`, cached in `state/places.json`); a town farther than the radius plus 3 miles is out of area. A bare big-city name that cannot place the seller stays a candidate.
 - The first successful scan of each source and channel records existing matches quietly, so you never get a backlog. After that, each new listing ID is sent once per channel. Uncertain deliveries are held for review and never retried automatically.
 - Changing a watch's radius hides pickup listings found with a wider radius; the next scan brings back the ones inside it.
+
+## Black Friday watch list
+
+`black_friday.py` keeps a separate list of things to price-check before Black Friday (name, the most you'd pay, details and an optional product link) in `state/black_friday/list.json`. A dashboard can call `handle()` to add, edit, remove or mark items bought, and to start a search with the agent you pick: Antigravity (Gemini 3.8 Flash), Codex (your Codex default model) or Claude Code (Opus 5.5), all at high effort with web search and page reading only. One search runs at a time, in the background; run one by hand with `python black_friday.py --agent codex`.
+
+The agent reports current prices, early Black Friday deals, announced Black Friday and Cyber Monday sales, and whether waiting looks worthwhile. As with deal research, only links the agent read or that pass a page check are kept, and each agent's latest results are saved in `state/black_friday/results.json`. Claude Code is found on `PATH`, in the usual install folders or inside the Claude desktop app.
 
 ## Requirements
 
