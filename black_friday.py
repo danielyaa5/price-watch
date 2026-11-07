@@ -37,6 +37,10 @@ DEFAULT_AGENT='agy'
 STRIPPED=('ANTHROPIC_','OPENAI_','GEMINI_','GOOGLE_API','CLAUDE_CODE_USE_','CLAUDECODE','CLAUDE_CODE_ENTRYPOINT')
 # Codex reports these items for tools a deal search must not use.
 CODEX_TOOLS=('command_execution','file_change','mcp_tool_call','collab_tool_call')
+# Codex keeps a shell even in its read-only sandbox, and one real search used it (Nov 2026). Its shell, computer,
+# browser and sub-agent features are switched off; web search still works through its code mode.
+CODEX_OFF=('shell_tool','unified_exec','computer_use','browser_use','multi_agent')
+CODEX_RULES='Use only your built-in web search, which can also open pages. Never run shell commands, read or list local files, or write files: everything you need is in this prompt or on the web. Open each offer or sale page you report and take its price from that page, not from search snippets.\n\n'
 KINDS=('early_black_friday','black_friday','cyber_monday','sale','regular_price')
 TIMING=('buy_now','wait','unclear')
 
@@ -194,26 +198,30 @@ def codex_command(binary,workdir):
     answer=Path(workdir)/'answer.json'
     # Read-only sandbox, live web search, no MCP servers; the prompt goes on stdin.
     return [binary,'exec','--json','--sandbox','read-only','--skip-git-repo-check','--ephemeral','--color','never','-c','web_search="live"',
-        '-c','mcp_servers={}','-c','model_reasoning_effort="high"','--output-schema',str(schema),'-o',str(answer),'-'],answer
+        '-c','mcp_servers={}',*(x for f in CODEX_OFF for x in ('--disable',f)),'-c','model_reasoning_effort="high"','--output-schema',str(schema),'-o',str(answer),'-'],answer
 
 def parse_codex(out,returncode,answer):
     if len(out)>8_000_000:raise ResearchError('Codex response exceeded the report size limit.')
-    searches=0;opened=set();other=set();failure=None
+    searches=0;opened=set();other={};failure=None
     for line in out.splitlines():
         try:event=json.loads(line)
         except ValueError:continue
         if not isinstance(event,dict):continue
         kind=event.get('type');item=event.get('item') if isinstance(event.get('item'),dict) else {}
         if kind=='item.completed' and item.get('type')=='web_search':
+            # Code mode reports searches, opened pages and find-in-page steps all as web_search items.
             action=item.get('action') if isinstance(item.get('action'),dict) else {}
             url=public_url(action.get('url')) if action.get('type') in ('open_page','find_in_page') else None
             if url:opened.add(url)
-            else:searches+=1
-        elif kind in ('item.started','item.completed') and item.get('type') in CODEX_TOOLS:other.add(item['type'])
+            if action.get('type') in (None,'search'):searches+=1
+        elif kind in ('item.started','item.completed') and item.get('type') in CODEX_TOOLS:
+            other.setdefault(item['type'],' '.join(str(item.get('command') or item.get('tool') or '').split())[:80])
         elif kind=='turn.failed':
             error=event.get('error') if isinstance(event.get('error'),dict) else {}
             failure=str(error.get('message') or 'Codex reported an error.')[:300]
-    if other:raise ResearchError(f"Codex tried tools a deal search can't use ({', '.join(sorted(other))}); previous results kept.")
+    if other:
+        tried=', '.join(f'{k} "{v}"' if v else k for k,v in sorted(other.items()))
+        raise ResearchError(f"Codex tried tools a deal search can't use ({tried}) and was stopped; previous results kept.")
     if failure or returncode:raise ResearchError(f'Codex did not finish{": "+failure if failure else ""}. Check its sign-in or usage limits on this Mac; previous results kept.')
     if not searches:raise ResearchError('Codex returned no evidence of a live web search; previous results kept.')
     output=json_answer(answer)
@@ -225,7 +233,7 @@ def invoke_codex(items):
     if not binary:raise ResearchError('Codex is not installed on this Mac.')
     with tempfile.TemporaryDirectory(prefix='price-watch-black-friday-') as cwd:
         argv,answer=codex_command(binary,cwd)
-        out,code=execute(argv,prompt(items),cwd,environment(binary),'Codex')
+        out,code=execute(argv,CODEX_RULES+SYSTEM+'\n\n'+prompt(items),cwd,environment(binary),'Codex')
         try:last=answer.read_text()[:2_000_000]
         except OSError:last=''
     output,evidence=parse_codex(out,code,last)
