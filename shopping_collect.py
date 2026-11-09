@@ -382,8 +382,10 @@ def run(root, matcher, source, item_id=None, fetcher=fetch, force=False):
             try:
                 found={}
                 for query in watch['queries']:
-                    if calls>=16 or time.monotonic()>deadline:
+                    if calls>=16:
                         raise ShoppingError('Shopping scan limit reached; reduce active search phrases.')
+                    if time.monotonic()>deadline:
+                        raise ShoppingError('Shopping scan exceeded its time limit before this watch was checked.')
                     calls+=1
                     if source=='amazon':
                         url='https://www.amazon.com/s?'+urlencode({'k':query,'rh':'p_n_condition-type:6461716011'})

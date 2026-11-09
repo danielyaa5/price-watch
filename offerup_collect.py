@@ -212,6 +212,9 @@ def save_scan(root, scan):
     data = read(path, {'catalog': {}, 'checks': {}, 'scan': {}}); data['scan'] = scan; atomic(path, data)
 
 
+TIME_LIMIT = 'OfferUp scan exceeded its time limit before this watch was checked.'
+
+
 def run(root, matcher, item_id=None, fetcher=fetch, detail_fetcher=None):
     if detail_fetcher is None:
         detail_fetcher = fetch_details if fetcher is fetch else (lambda _: {})
@@ -229,7 +232,8 @@ def run(root, matcher, item_id=None, fetcher=fetch, detail_fetcher=None):
                 if blocked: raise OfferUpError(blocked)
                 radius = effective_radius(watch['radius']); found = {}
                 for query in watch['queries']:
-                    if calls >= 24 or time.monotonic() > deadline: raise OfferUpError('OfferUp scan limit reached. Narrow the phrases or reduce active watches.')
+                    if calls >= 24: raise OfferUpError('OfferUp scan limit reached. Narrow the phrases or reduce active watches.')
+                    if time.monotonic() > deadline: raise OfferUpError(TIME_LIMIT)
                     if calls: time.sleep(1)
                     calls += 1
                     rows, limited = parse_search(fetcher(search_url(watch, query)), watch, query)
@@ -240,7 +244,8 @@ def run(root, matcher, item_id=None, fetcher=fetch, detail_fetcher=None):
                 for start in range(0, len(ids), 45):
                     batch = ids[start:start + 45]
                     if detail_fetcher is fetch_details:
-                        if calls >= 24 or time.monotonic() > deadline: raise OfferUpError('OfferUp scan limit reached. Narrow the phrases or reduce active watches.')
+                        if calls >= 24: raise OfferUpError('OfferUp scan limit reached. Narrow the phrases or reduce active watches.')
+                        if time.monotonic() > deadline: raise OfferUpError(TIME_LIMIT)
                         if calls: time.sleep(0.5)
                         calls += 1
                     details.update(detail_fetcher(batch))

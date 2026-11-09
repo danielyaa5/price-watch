@@ -72,6 +72,13 @@ class OfferUpTests(unittest.TestCase):
         run(self.root, reason, fetcher=lambda _: self.html())
         self.assertEqual(snapshot(self.root)[1]['studio']['status'], 'ok')
 
+    def test_slow_scan_reports_time_limit_not_request_cap(self):
+        clock = iter([0] + [1000] * 20)  # The scan starts, then every later check is past its deadline.
+        with patch('offerup_collect.time.monotonic', lambda: next(clock)):
+            run(self.root, reason, fetcher=lambda _: self.html())
+        detail = snapshot(self.root)[1]['studio']['detail']
+        self.assertIn('exceeded its time limit', detail); self.assertNotIn('limit reached', detail)
+
     def test_inflight_pause_does_not_publish_results(self):
         def pause(_):
             _, watches, registry = definitions(self.root); w = watches['studio']; w['enabled'] = False

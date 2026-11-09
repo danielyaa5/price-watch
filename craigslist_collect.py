@@ -114,7 +114,8 @@ def run(root,matcher,item_id=None,fetcher=fetch):
         def get(url):
             nonlocal calls,blocked
             if blocked:raise CraigslistError('Craigslist denied access earlier in this run; remaining checks stopped.')
-            if calls>=36 or time.monotonic()>deadline:raise CraigslistError('Craigslist scan limit reached; narrow the search phrases.')
+            if calls>=36:raise CraigslistError('Craigslist scan limit reached; narrow the search phrases.')
+            if time.monotonic()>deadline:raise CraigslistError('Craigslist scan exceeded its time limit before this watch was checked.')
             if calls:time.sleep(.5)
             calls+=1
             try:return fetcher(url)

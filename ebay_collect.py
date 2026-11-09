@@ -63,7 +63,8 @@ def run(root,matcher,item_id=None):
             try:
                 for query in watch['queries']:
                     for offset in (0,100):
-                        if calls>=85 or time.monotonic()>deadline:raise EbayError('Scan request budget reached; narrow the search or reduce active watches.')
+                        if calls>=85:raise EbayError('Scan request budget reached; narrow the search or reduce active watches.')
+                        if time.monotonic()>deadline:raise EbayError('eBay scan exceeded its time limit before this watch was checked.')
                         conditions=',conditions:{USED|REFURBISHED}' if watch['condition']=='used' else ',conditions:{NEW}' if watch['condition']=='new' else ''
                         params={'q':query,'limit':'100','offset':str(offset),'sort':'newlyListed','filter':f"price:[{search_bounds(watch)[0]}..{search_bounds(watch)[1]}],priceCurrency:USD,itemLocationCountry:US,buyingOptions:{{FIXED_PRICE}}"+conditions}
                         result=client.get('/buy/browse/v1/item_summary/search',params);calls+=1

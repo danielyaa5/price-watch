@@ -1,12 +1,18 @@
 """Source failures and recovery, independent of buying alerts. Delivery is opt-in."""
 import fcntl, json, uuid
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from watch_config import definitions, atomic, now, fingerprint, local_settings
 
 NAMES={'facebook':'Facebook','ebay':'eBay','offerup':'OfferUp','craigslist':'Craigslist','retail':'Retail stores','amazon':'Amazon','google_shopping':'Google Shopping'}
 URL=local_settings().get('dashboard',{}).get('sources_url','http://localhost:8088/price-watch/#sources')
 VERSION=1
+# Most failures are a slow or refused page that the next 30-minute check fixes. Alert only
+# when the same watch keeps failing for this long; problems that cannot fix themselves
+# (a lost sign-in) alert at once. The Sources page shows every failure either way.
+ALERT_AFTER_HOURS=2
+IMMEDIATE={'Sign-in required.'}
 
 def read(path, default):
     try:return json.loads(path.read_text())
@@ -45,6 +51,13 @@ def issue(source,text):
         return 'The search allowance was reached.','Open Sources to review the search allowance and next available check.'
     return 'A search failed or completed only partly.','Open Sources to review the failed check and connection.'
 
+def hours_between(start,end):
+    try:return (datetime.fromisoformat(end)-datetime.fromisoformat(start)).total_seconds()/3600
+    except (TypeError,ValueError):return 0
+
+def persistent(check):
+    return check['problem'] in IMMEDIATE or hours_between(check.get('since',check['at']),check['at'])>=ALERT_AFTER_HOURS
+
 def message(source,event):
     name=NAMES[source];recovery=event['kind']=='recovery'
     title=f"Price Watch: {name} {'recovered' if recovery else 'needs attention'}"
@@ -70,7 +83,10 @@ def observe(root,source,checks,notify=False,sender=None):
             stamp=check.get('checked_at') or check.get('finished_at')
             if not stamp or stamp<=s['checks'].get(key,{}).get('at',''):continue
             problem,action=issue(source,check.get('error') or check.get('detail',''))
-            s['checks'][key]={'at':stamp,'failed':check['status']!='ok','problem':problem,'action':action};changed=True
+            failed=check['status']!='ok';old=s['checks'].get(key,{})
+            s['checks'][key]={'at':stamp,'failed':failed,'problem':problem,'action':action};changed=True
+            # Start of this watch's unbroken run of failed checks.
+            if failed:s['checks'][key]['since']=old.get('since',old.get('at',stamp)) if old.get('failed') else stamp
         failures={k:v for k,v in s['checks'].items() if v['failed']}
         outage=s.get('outage')
         if failures and not outage:
@@ -87,12 +103,16 @@ def observe(root,source,checks,notify=False,sender=None):
             event={'id':uuid.uuid4().hex,'kind':'recovery','at':max(v['at'] for v in s['checks'].values()),'watches':outage['watches'],'delivery':{},'failure_delivery':dict(outage['delivery'])}
             s['events'].append(event);s['outage']=None
         elif not watches:s['outage']=None
+        if failures and not outage.get('confirmed_at') and any(persistent(v) for v in failures.values()):
+            outage['confirmed_at']=max(v['at'] for v in failures.values())
         s['events']=s['events'][-40:];atomic(path,state)
         settings=config(root)
         if not notify or settings.get('approved_version')!=VERSION:return
         # Only the current outage or latest recovery; never replay historical events.
         event=s.get('outage') or (s['events'][-1] if s['events'] and s['events'][-1]['kind']=='recovery' else None)
         if not event or not watches:return
+        # A failure that clears up by itself before it is confirmed sends nothing, not even recovery.
+        if event['kind']=='failure' and not event.get('confirmed_at'):return
         for channel,enabled in settings['channels'].items():
             if not enabled or channel in event['delivery']:continue
             if event['kind']=='recovery' and event.get('failure_delivery',{}).get(channel,{}).get('status')!='sent':continue

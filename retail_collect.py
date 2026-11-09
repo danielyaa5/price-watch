@@ -80,7 +80,8 @@ def run(root,matcher,item_id=None,fetcher=fetch):
         def get(url):
             nonlocal calls
             if url in cache:return cache[url]
-            if calls>=65 or time.monotonic()>deadline:raise RetailError('Retail scan limit reached; reduce active stores or phrases.')
+            if calls>=65:raise RetailError('Retail scan limit reached; reduce active stores or phrases.')
+            if time.monotonic()>deadline:raise RetailError('Retail scan exceeded its time limit before this store was checked.')
             if calls:time.sleep(.25)
             calls+=1;cache[url]=fetcher(url);return cache[url]
         for watch in definitions(root)[1].values():

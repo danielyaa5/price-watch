@@ -1,6 +1,7 @@
 import json, tempfile, unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from source_health import configure, observe, dashboard, observe_report, message
+from source_health import configure, observe, dashboard, observe_report, message, issue
 
 class HealthTests(unittest.TestCase):
     def setUp(self):
@@ -11,6 +12,10 @@ class HealthTests(unittest.TestCase):
     def approve(self):configure({'channels':{'email':True,'ntfy':True},'approve':True},self.root)
     def check(self,stamp,status='error',ids=('studio',),notify=True,sender=None):
         observe(self.root,'facebook',{k:{'checked_at':stamp,'status':status,'error':'authentication required SECRET'} for k in ids},notify,self.sender if sender is None else sender)
+    def slow(self,minutes,status='error',ids=('studio',)):
+        """A scheduled check that timed out, which usually clears up on the next run."""
+        stamp=(datetime(2026,1,1,tzinfo=timezone.utc)+timedelta(minutes=minutes)).isoformat()
+        observe(self.root,'facebook',{k:{'checked_at':stamp,'status':status,'error':'Facebook watch check exceeded its time limit'} for k in ids},True,self.sender)
     def test_approval_required(self):
         with self.assertRaises(ValueError):configure({'channels':{'email':True,'ntfy':True}},self.root)
         self.check('2026-01-01');self.assertFalse(self.calls)
@@ -44,5 +49,32 @@ class HealthTests(unittest.TestCase):
         event=dashboard(self.root)['events'][0];self.assertEqual(event['watches'],['Mac Studio']);self.assertEqual(event['problem'],'Sign-in required.')
     def test_disable_channel_independently(self):
         self.approve();configure({'channels':{'email':False,'ntfy':True}},self.root);self.check('2026-01-01');self.assertEqual([c for c,m in self.calls],['ntfy'])
+    def test_one_off_failure_sends_nothing_but_stays_visible(self):
+        self.approve();self.slow(0);self.slow(30,'ok');self.assertFalse(self.calls)
+        events=dashboard(self.root)['events'];self.assertEqual([e['kind'] for e in events],['recovery','failure'])
+        self.assertTrue(all(not e['delivery'] for e in events))
+    def test_alert_after_two_hours_of_failed_checks(self):
+        self.approve()
+        for minutes in (0,30,60,90):self.slow(minutes)
+        self.assertFalse(self.calls);self.assertTrue(dashboard(self.root)['outages'])
+        self.slow(120);self.assertEqual(len(self.calls),2)
+        self.assertIn('needs attention',self.calls[0][1]['title']);self.assertIn('did not finish in time',self.calls[0][1]['body'])
+        self.slow(150);self.assertEqual(len(self.calls),2)
+        self.slow(180,'ok');self.assertEqual(len(self.calls),4);self.assertIn('recovered',self.calls[-1][1]['title'])
+    def test_passing_check_restarts_the_clock(self):
+        self.approve()
+        for minutes,status in ((0,'error'),(60,'error'),(90,'ok'),(120,'error'),(180,'error')):self.slow(minutes,status)
+        self.assertFalse(self.calls)
+        self.slow(240);self.assertEqual(len(self.calls),2)
+    def test_each_watch_needs_its_own_unbroken_failures(self):
+        self.approve()
+        for minutes in range(0,300,60):
+            failing,passing=(('studio',),('ams',)) if minutes%120==0 else (('ams',),('studio',))
+            self.slow(minutes,ids=failing);self.slow(minutes,'ok',ids=passing)
+        self.assertFalse(self.calls)
+    def test_time_limits_are_not_reported_as_allowance(self):
+        self.assertEqual(issue('offerup','OfferUp scan exceeded its time limit before this watch was checked.')[0],'The search did not finish in time.')
+        self.assertEqual(issue('amazon','Shopping scan exceeded its time limit before this watch was checked.')[0],'The search did not finish in time.')
+        self.assertEqual(issue('offerup','OfferUp scan limit reached. Narrow the phrases or reduce active watches.')[0],'The search allowance was reached.')
 
 if __name__=='__main__':unittest.main()
