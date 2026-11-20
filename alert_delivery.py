@@ -38,7 +38,7 @@ def send(root,channel,value):
         if result.returncode:raise RuntimeError('Email delivery could not be confirmed.')
         receipt=json.loads(result.stdout).get('message_id')
     else:
-        # The 'ntfy' channel key is historical; phone alerts now go to Slack #alerts-fyi.
+        # The 'ntfy' channel key is historical; phone alerts now go to the Slack home-server channel.
         from slack_alert import post
         receipt=post(value['title'],value['body'],'fyi')
     if not receipt:raise RuntimeError('Provider supplied no receipt.')

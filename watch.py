@@ -168,7 +168,7 @@ def deliver_once(db,item,listing,baseline=False,sender=None):
     return 'sent',receipt
 
 def send_slack(item,listing):
-    # Phone alerts go to Slack #alerts-fyi; the stored channel key is still 'ntfy'.
+    # Phone alerts go to the Slack home-server channel; the stored channel key is still 'ntfy'.
     from slack_alert import post
     msg=payload(item,listing)
     receipt=post(msg['title'],msg['message'],'fyi')

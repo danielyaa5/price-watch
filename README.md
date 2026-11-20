@@ -47,7 +47,7 @@ The agent reports current prices, early Black Friday deals, announced Black Frid
 3. Build the geocoder: `swiftc -O geocode.swift -o bin/geocode`.
 4. Sign in to Facebook once: `python watch.py --login`. The session is stored by the upstream tool with mode 0600; no password is kept.
 5. Optional private files next to the code (all ignored by git):
-   - `~/.config/slack-alerts/webhooks.env` (outside the repo, mode 600): `SLACK_WEBHOOK_FYI=https://hooks.slack.com/services/...` for deals and source health, and `SLACK_WEBHOOK_ALERTS=...` for alerts that need you, such as an expired Facebook sign-in.
+   - `~/.config/slack-alerts/webhooks.env` (outside the repo, mode 600): `SLACK_WEBHOOK_HOME_SERVER=https://hooks.slack.com/services/...`. Deals and source health post quietly; alerts that need you, such as an expired Facebook sign-in, start with @channel.
    - `mail-private.json`: `{"sender": "...", "recipient": "..."}`. Email goes through the Gmail API with credentials saved by [workspace-mcp](https://github.com/taylorwilsdon/google_workspace_mcp) in `~/.config/workspace-mcp/credentials/`, run with the Python in `~/.local/share/workspace-mcp/venv`
    - `ebay-private.json`: eBay API client ID, secret and account-deletion endpoint details
    - `shopping-private.json`: SerpApi key
