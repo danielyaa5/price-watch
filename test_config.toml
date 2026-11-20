@@ -12,14 +12,6 @@ max_search_interval = '30m'
 sort_by = 'new'
 availability = 'in'
 
-[user.me]
-notify_with = ['notification.ntfy']
-
-[notification.ntfy]
-enabled = false
-ntfy_server = 'https://ntfy.sh'
-ntfy_topic = '${PRICE_WATCH_NTFY_TOPIC}'
-
 [item.macbook]
 search_phrases = ['MacBook M5 Pro 64GB']
 title_keywords = '(MacBook OR "Mac Book") AND Pro'

@@ -28,14 +28,6 @@ longitude = -118.2437
 [dashboard]
 sources_url = 'http://localhost:8088/price-watch/#sources'
 
-[user.me]
-notify_with = ['notification.ntfy']
-
-[notification.ntfy]
-enabled = false
-ntfy_server = 'https://ntfy.sh'
-ntfy_topic = '${PRICE_WATCH_NTFY_TOPIC}'
-
 # One example watch. Add more here or in the dashboard.
 [item.example_camera]
 search_phrases = ['Sony A7 IV']

@@ -253,13 +253,14 @@ class LoginAlertTests(unittest.TestCase):
     def test_login_expiry_alerts_once_per_outage(self):
         import tempfile, json, watch
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp);(root/'notification-private.json').write_text(json.dumps({'server':'https://ntfy.example','topic':'t'}))
+            root=Path(tmp)
             posts=[]
-            def poster(url,json=None,timeout=None):
-                posts.append(json);return SimpleNamespace(raise_for_status=lambda:None)
+            def poster(title,message,channel):
+                posts.append({'title':title,'message':message,'channel':channel});return 'slack-alerts:test'
             with patch.multiple(watch,ROOT=root,LOGIN_ALERT=root/'login-alert.json'):
                 self.assertFalse(watch.alert_login_expired('Facebook watch check exceeded its time limit',poster))
                 self.assertTrue(watch.alert_login_expired('Facebook authentication required; run the separate login command',poster))
                 self.assertFalse(watch.alert_login_expired('Facebook authentication required; run the separate login command',poster))
             self.assertEqual(len(posts),1)
             self.assertIn('watch.py --login',posts[0]['message'])
+            self.assertEqual(posts[0]['channel'],'alerts')

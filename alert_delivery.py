@@ -38,10 +38,9 @@ def send(root,channel,value):
         if result.returncode:raise RuntimeError('Email delivery could not be confirmed.')
         receipt=json.loads(result.stdout).get('message_id')
     else:
-        dest=json.loads((Path(root)/'notification-private.json').read_text())
-        request=urllib.request.Request(dest['server'].rstrip('/'),data=json.dumps({'topic':dest['topic'],'priority':4,'title':value['title'],'message':value['body']}).encode(),headers={'Content-Type':'application/json'})
-        with urllib.request.urlopen(request,timeout=15) as response:result=json.load(response)
-        receipt=result.get('id') if result.get('event')=='message' else None
+        # The 'ntfy' channel key is historical; phone alerts now go to Slack #alerts-fyi.
+        from slack_alert import post
+        receipt=post(value['title'],value['body'],'fyi')
     if not receipt:raise RuntimeError('Provider supplied no receipt.')
     return str(receipt)
 

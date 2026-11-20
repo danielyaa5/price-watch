@@ -1,6 +1,6 @@
 # price-watch
 
-A self-hosted watcher for things you want to buy used or at a good price. It searches local and online marketplaces on a schedule, matches listings against exact specifications and a budget, and sends one email and/or [ntfy](https://ntfy.sh) phone alert per new qualifying listing.
+A self-hosted watcher for things you want to buy used or at a good price. It searches local and online marketplaces on a schedule, matches listings against exact specifications and a budget, and sends one email and/or Slack message (through an [incoming webhook](https://api.slack.com/messaging/webhooks)) per new qualifying listing.
 
 It runs on an always-on Mac and is built around [ai-marketplace-monitor](https://github.com/BoPeng/ai-marketplace-monitor) for Facebook Marketplace, with its paid AI features turned off. Matching is local and rule-based. An optional research job asks an agent CLI (Antigravity or Claude Code) to look for deals and announced sales a few times a day.
 
@@ -47,7 +47,7 @@ The agent reports current prices, early Black Friday deals, announced Black Frid
 3. Build the geocoder: `swiftc -O geocode.swift -o bin/geocode`.
 4. Sign in to Facebook once: `python watch.py --login`. The session is stored by the upstream tool with mode 0600; no password is kept.
 5. Optional private files next to the code (all ignored by git):
-   - `notification-private.json`: `{"server": "https://ntfy.sh", "topic": "<your topic>"}`
+   - `~/.config/slack-alerts/webhooks.env` (outside the repo, mode 600): `SLACK_WEBHOOK_FYI=https://hooks.slack.com/services/...` for deals and source health, and `SLACK_WEBHOOK_ALERTS=...` for alerts that need you, such as an expired Facebook sign-in.
    - `mail-private.json`: `{"sender": "...", "recipient": "..."}`. Email goes through the Gmail API with credentials saved by [workspace-mcp](https://github.com/taylorwilsdon/google_workspace_mcp) in `~/.config/workspace-mcp/credentials/`, run with the Python in `~/.local/share/workspace-mcp/venv`
    - `ebay-private.json`: eBay API client ID, secret and account-deletion endpoint details
    - `shopping-private.json`: SerpApi key

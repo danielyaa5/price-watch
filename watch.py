@@ -167,17 +167,14 @@ def deliver_once(db,item,listing,baseline=False,sender=None):
     db.execute('UPDATE seen SET status=?,receipt=? WHERE item=? AND id=?',('sent',receipt,item,listing.id));db.commit()
     return 'sent',receipt
 
-def send_ntfy(item,listing):
-    dest=json.loads((ROOT/'notification-private.json').read_text())
+def send_slack(item,listing):
+    # Phone alerts go to Slack #alerts-fyi; the stored channel key is still 'ntfy'.
+    from slack_alert import post
     msg=payload(item,listing)
-    # JSON preserves Unicode in body/title. No third-party attribution or attachment.
-    response=requests.post(dest['server'].rstrip('/'),json={'topic':dest['topic'],'priority':4,**msg},timeout=15)
-    response.raise_for_status()
-    receipt=response.json()
-    if receipt.get('event')!='message' or not receipt.get('id'):raise RuntimeError('Notification server supplied no message receipt')
+    receipt=post(msg['title'],msg['message'],'fyi')
     with (STATE/'receipts.jsonl').open('a') as f:
-        f.write(json.dumps({'at':now(),'item':item,'listing_id':listing.id,'message_id':receipt['id'],'title':msg['title'],'message':msg['message']})+'\n')
-    return receipt['id']
+        f.write(json.dumps({'at':now(),'item':item,'listing_id':listing.id,'message_id':receipt,'title':msg['title'],'message':msg['message']})+'\n')
+    return receipt
 
 def email_payload(item,listing):
     return {'subject':f'Price watch: {LABELS.get(item,item)} at {listing.price}',
@@ -212,7 +209,7 @@ def send_channels(db,item,listing,senders):
 
 def send(item,listing):
     with sqlite3.connect(STATE/'seen.sqlite3') as db:
-        return send_channels(db,item,listing,{'ntfy':send_ntfy,'email':send_email})
+        return send_channels(db,item,listing,{'ntfy':send_slack,'email':send_email})
 
 class BoundedFacebook(FacebookMarketplace):
     def set_search_radius(self,radius):
@@ -324,11 +321,9 @@ def alert_login_expired(error,poster=None):
     # 30-minute retries don't repeat it. Facebook's security check needs a person.
     if 'authentication required' not in error or LOGIN_ALERT.exists():return False
     try:
-        dest=json.loads((ROOT/'notification-private.json').read_text())
-        response=(poster or requests.post)(dest['server'].rstrip('/'),json={'topic':dest['topic'],'priority':4,
-            'title':'Price Watch: Facebook sign-in expired',
-            'message':f'Facebook scans are paused until you sign in again. On {HOST} (in person or over Screen Sharing), run: '+LOGIN_FIX},timeout=15)
-        response.raise_for_status()
+        from slack_alert import post
+        (poster or post)('Price Watch: Facebook sign-in expired',
+            f'Facebook scans are paused until you sign in again. On {HOST} (in person or over Screen Sharing), run: '+LOGIN_FIX,'alerts')
     except Exception:
         logging.error('Login-expired alert could not be sent; will retry on the next run.');return False
     atomic_json(LOGIN_ALERT,{'sent_at':now(),'error':error.split('\n')[0]})
